@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Trade Activity Dashboard</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111a2e;
+    --panel-2: #16213a;
+    --border: #223052;
+    --text: #e6ecf7;
+    --muted: #8fa3c2;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, #13224a 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; border-bottom: 1px solid var(--border);
+    background: rgba(11,18,32,.8); backdrop-filter: blur(6px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 18px; font-weight: 600; letter-spacing: .3px; }
+  header h1 span { color: var(--blue); }
+  .who { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .who .muted { color: var(--muted); }
+  .badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .badge.admin { background: rgba(245,158,11,.15); color: var(--amber); border: 1px solid rgba(245,158,11,.4); }
+  .badge.user { background: rgba(59,130,246,.15); color: var(--blue); border: 1px solid rgba(59,130,246,.4); }
+  button { cursor: pointer; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; padding: 9px 16px; transition: .15s; }
+  button.primary { background: var(--blue); color: #fff; }
+  button.primary:hover { background: #2f6fe0; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.ghost:hover { color: var(--text); border-color: var(--muted); }
+  button.small { padding: 5px 10px; font-size: 12px; }
+  input, select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; width: 100%;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--blue); }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+  .field { margin-bottom: 12px; }
+  .grid { display: grid; gap: 12px; }
+  .cards { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--border); border-radius: 12px; padding: 18px;
+  }
+  .card .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .card .value { font-size: 25px; font-weight: 700; letter-spacing: -.5px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  main { padding: 24px; max-width: 1280px; margin: 0 auto; }
+  .row { grid-template-columns: 2fr 1fr; }
+  @media (max-width: 900px) { .row { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .panel h2 { font-size: 14px; font-weight: 600; margin-bottom: 14px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid rgba(34,48,82,.5); }
+  .tag { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+  .tag.BUY { background: rgba(34,197,94,.15); color: var(--green); }
+  .tag.SELL { background: rgba(239,68,68,.15); color: var(--red); }
+  .tag.EXECUTED { background: rgba(59,130,246,.15); color: var(--blue); }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; padding: 12px 18px; border-radius: 10px;
+    font-size: 13px; font-weight: 500; z-index: 100; opacity: 0; transform: translateY(8px);
+    transition: .25s; max-width: 360px;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.ok { background: var(--panel-2); border: 1px solid var(--green); color: var(--green); }
+  .toast.err { background: var(--panel-2); border: 1px solid var(--red); color: var(--red); }
+  .empty { color: var(--muted); text-align: center; padding: 30px 0; font-size: 13px; }
+  .loading { color: var(--muted); text-align: center; padding: 30px 0; font-size: 13px; }
+  .auth-wrap { max-width: 380px; margin: 80px auto; }
+  .auth-tab { display: flex; gap: 8px; margin-bottom: 16px; }
+  .auth-tab button { flex: 1; }
+  .auth-tab button.active { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 14px; text-align: center; line-height: 1.5; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button.active { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  #login-panel h1, #register-panel h1 { font-size: 20px; margin-bottom: 4px; }
+  #login-panel .sub, #register-panel .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header id="topbar" class="hidden">
+  <h1>Trade<span>Flow</span> Analytics</h1>
+  <div class="who">
+    <span class="muted" id="who-email"></span>
+    <span class="badge" id="who-role"></span>
+    <button class="ghost small" onclick="logout()">Logout</button>
+  </div>
+</header>
+<main>
+
+  <div id="auth-view">
+    <div class="auth-wrap">
+      <div class="auth-tab">
+        <button id="tab-login" class="active" onclick="showAuth('login')">Login</button>
+        <button id="tab-register" onclick="showAuth('register')">Register</button>
+      </div>
+
+      <div id="login-panel">
+        <h1>Welcome back</h1>
+        <div class="sub">Sign in to view your trading analytics</div>
+        <div class="panel">
+          <form onsubmit="doLogin(event)">
+            <div class="field">
+              <label>Email</label>
+              <input type="email" id="login-email" value="user1@example.com" required />
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input type="password" id="login-password" value="password123" required />
+            </div>
+            <button class="primary" style="width:100%" type="submit">Sign in</button>
+          </form>
+        </div>
+        <div class="hint">Demo admin: <b>user1@example.com</b> / <b>password123</b><br/>Other users: user2@example.com ... user5@example.com (same password)</div>
+      </div>
+
+      <div id="register-panel" class="hidden">
+        <h1>Create account</h1>
+        <div class="sub">Join the platform</div>
+        <div class="panel">
+          <form onsubmit="doRegister(event)">
+            <div class="field">
+              <label>Name</label>
+              <input type="text" id="reg-name" required />
+            </div>
+            <div class="field">
+              <label>Email</label>
+              <input type="email" id="reg-email" required />
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input type="password" id="reg-password" required minlength="6" />
+            </div>
+            <button class="primary" style="width:100%" type="submit">Create account</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dash-view" class="hidden">
+    <div class="tabs">
+      <button class="ghost active" id="tab-dash" onclick="showTab('dash')">Portfolio</button>
+      <button class="ghost" id="tab-admin" onclick="showTab('admin')">Admin Overview</button>
+    </div>
+
+    <div id="tab-dash-content">
+      <div class="grid cards" style="margin-bottom:16px">
+        <div class="card">
+          <div class="label">Wallet Balance</div>
+          <div class="value" id="c-wallet">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Realized P&L</div>
+          <div class="value" id="c-pnl">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Bought</div>
+          <div class="value" id="c-bought">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Sold</div>
+          <div class="value" id="c-sold">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Deposits / Withdrawals</div>
+          <div class="value" id="c-dep" style="font-size:18px">–</div>
+          <div class="sub" id="c-withdrawals"></div>
+        </div>
+        <div class="card">
+          <div class="label">Trades</div>
+          <div class="value" id="c-trades">–</div>
+          <div class="sub" id="c-trade-split"></div>
+        </div>
+      </div>
+
+      <div class="grid row">
+        <div class="panel">
+          <h2>Place Trade</h2>
+          <form onsubmit="placeTrade(event)">
+            <div class="grid form-grid">
+              <div class="field">
+                <label>Symbol</label>
+                <select id="t-symbol">
+                  <option>BTC</option><option>ETH</option><option>DOGE</option>
+                  <option>SOL</option><option>XRP</option><option>BNB</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Type</label>
+                <select id="t-type"><option>BUY</option><option>SELL</option></select>
+              </div>
+              <div class="field">
+                <label>Quantity</label>
+                <input type="number" id="t-qty" min="0.000001" step="any" placeholder="e.g. 2" required />
+              </div>
+              <div class="field">
+                <label>Price</label>
+                <input type="number" id="t-price" min="0.0000001" step="any" placeholder="e.g. 100" required />
+              </div>
+            </div>
+            <button class="primary" type="submit">Execute</button>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h2>Wallet Actions</h2>
+          <form onsubmit="walletAction(event, 'deposit')">
+            <div class="field">
+              <label>Deposit amount</label>
+              <div class="btn-row">
+                <input type="number" id="d-amount" min="1" step="any" placeholder="e.g. 5000" required />
+                <button class="primary" type="submit">Deposit</button>
+              </div>
+            </div>
+          </form>
+          <form onsubmit="walletAction(event, 'withdraw')">
+            <div class="field">
+              <label>Withdraw amount</label>
+              <div class="btn-row">
+                <input type="number" id="w-amount" min="1" step="any" placeholder="e.g. 1000" required />
+                <button class="ghost" type="submit">Withdraw</button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:16px">
+        <h2>Recent Trades</h2>
+        <div id="trades-loading" class="loading">Loading trades…</div>
+        <div id="trades-wrap" class="hidden">
+          <div style="overflow-x:auto"><table>
+            <thead><tr><th>Date</th><th>Symbol</th><th>Type</th><th>Qty</th><th>Price</th><th>Amount</th><th>Status</th></tr></thead>
+            <tbody id="trades-body"></tbody>
+          </table></div>
+        </div>
+        <div id="trades-empty" class="empty hidden">No trades yet.</div>
+      </div>
+    </div>
+
+    <div id="tab-admin-content" class="hidden">
+      <div class="grid cards" style="margin-bottom:16px">
+        <div class="card">
+          <div class="label">Total Users</div>
+          <div class="value" id="a-users">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Platform Volume</div>
+          <div class="value" id="a-volume">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Active (7d)</div>
+          <div class="value" id="a-active7">–</div>
+        </div>
+        <div class="card">
+          <div class="label">Retention 7d/30d</div>
+          <div class="value" id="a-retention">–</div>
+          <div class="sub" id="a-active30"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Top Users by Volume</h2>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Trade Count</th><th>Total Volume</th></tr></thead>
+          <tbody id="admin-body"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+</main>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let token = localStorage.getItem("token") || "";
+let user = null;
+
+function toast(msg, ok = true) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "toast " + (ok ? "ok" : "err") + " show";
+  clearTimeout(t._h);
+  t._h = setTimeout(() => (t.className = "toast"), 3200);
+}
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (token) headers.Authorization = "Bearer " + token;
+  const res = await fetch(path, { ...opts, headers });
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((data && data.message) || "Request failed (" + res.status + ")");
+  return data;
+}
+
+const fmt = (n) =>
+  n == null ? "–" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n);
+
+function showAuth(view) {
+  $("login-panel").classList.toggle("hidden", view !== "login");
+  $("register-panel").classList.toggle("hidden", view !== "register");
+  $("tab-login").classList.toggle("active", view === "login");
+  $("tab-register").classList.toggle("active", view === "register");
+}
+
+function showTab(tab) {
+  $("tab-dash").classList.toggle("active", tab === "dash");
+  $("tab-admin").classList.toggle("active", tab === "admin");
+  $("tab-dash-content").classList.toggle("hidden", tab !== "dash");
+  $("tab-admin-content").classList.toggle("hidden", tab !== "admin");
+  if (tab === "admin") loadAdmin();
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  btn.textContent = "Signing in…";
+  try {
+    const data = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: $("login-email").value.trim(), password: $("login-password").value }),
+    });
+    token = data.token;
+    user = data.user;
+    localStorage.setItem("token", token);
+    enterDashboard();
+    toast("Welcome back, " + user.name + "!");
+  } catch (err) {
+    toast(err.message, false);
+  } finally {
+    btn.textContent = "Sign in";
+  }
+}
+
+async function doRegister(e) {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  btn.textContent = "Creating…";
+  try {
+    const data = await api("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name: $("reg-name").value.trim(), email: $("reg-email").value.trim(), password: $("reg-password").value }),
+    });
+    token = data.token;
+    user = data.user;
+    localStorage.setItem("token", token);
+    enterDashboard();
+    toast("Account created!");
+  } catch (err) {
+    toast(err.message, false);
+  } finally {
+    btn.textContent = "Create account";
+  }
+}
+
+function enterDashboard() {
+  $("auth-view").classList.add("hidden");
+  $("dash-view").classList.remove("hidden");
+  $("topbar").classList.remove("hidden");
+  $("who-email").textContent = user.email;
+  $("who-role").textContent = user.role;
+  $("who-role").className = "badge " + (user.role === "admin" ? "admin" : "user");
+  $("tab-admin").classList.toggle("hidden", user.role !== "admin");
+  showTab("dash");
+  loadAll();
+}
+
+function logout() {
+  token = "";
+  user = null;
+  localStorage.removeItem("token");
+  $("dash-view").classList.add("hidden");
+  $("topbar").classList.add("hidden");
+  $("auth-view").classList.remove("hidden");
+}
+
+async function loadAll() {
+  await Promise.all([loadSummary(), loadTrades()]);
+}
+
+async function loadSummary() {
+  try {
+    const s = await api("/api/analytics/summary");
+    $("c-wallet").textContent = fmt(s.walletBalance);
+    const pnl = $("c-pnl");
+    pnl.textContent = fmt(s.realizedPnL);
+    pnl.className = "value " + (s.realizedPnL >= 0 ? "pos" : "neg");
+    $("c-bought").textContent = fmt(s.totals.totalBought);
+    $("c-sold").textContent = fmt(s.totals.totalSold);
+    $("c-dep").textContent = fmt(s.deposits);
+    $("c-withdrawals").textContent = "Withdrawals: " + fmt(s.withdrawals);
+    $("c-trades").textContent = s.trades.totalTrades;
+    $("c-trade-split").textContent = s.trades.buyCount + " buys / " + s.trades.sellCount + " sells";
+  } catch (err) {
+    toast(err.message, false);
+  }
+}
+
+async function loadTrades() {
+  $("trades-loading").classList.remove("hidden");
+  $("trades-wrap").classList.add("hidden");
+  $("trades-empty").classList.add("hidden");
+  try {
+    const data = await api("/api/trades?limit=50");
+    const tbody = $("trades-body");
+    tbody.innerHTML = "";
+    if (!data.trades || data.trades.length === 0) {
+      $("trades-empty").classList.remove("hidden");
+    } else {
+      data.trades.forEach((t) => {
+        const tr = document.createElement("tr");
+        const when = new Date(t.createdAt).toLocaleString();
+        tr.innerHTML =
+          "<td>" + when + "</td>" +
+          "<td><b>" + t.symbol + "</b></td>" +
+          '<td><span class="tag ' + t.type + '">' + t.type + "</span></td>" +
+          "<td>" + t.quantity + "</td>" +
+          "<td>" + fmt(t.price) + "</td>" +
+          "<td>" + fmt(t.amount) + "</td>" +
+          '<td><span class="tag EXECUTED">' + t.status + "</span></td>";
+        tbody.appendChild(tr);
+      });
+      $("trades-wrap").classList.remove("hidden");
+    }
+  } catch (err) {
+    toast(err.message, false);
+    $("trades-empty").classList.remove("hidden");
+    $("trades-empty").textContent = "Could not load trades.";
+  } finally {
+    $("trades-loading").classList.add("hidden");
+  }
+}
+
+async function placeTrade(e) {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  btn.textContent = "Placing…";
+  btn.disabled = true;
+  try {
+    const data = await api("/api/trades", {
+      method: "POST",
+      body: JSON.stringify({
+        symbol: $("t-symbol").value,
+        type: $("t-type").value,
+        quantity: Number($("t-qty").value),
+        price: Number($("t-price").value),
+      }),
+    });
+    toast("Trade executed — balance now " + fmt(data.walletBalance));
+    e.target.reset();
+    loadAll();
+  } catch (err) {
+    toast(err.message, false);
+  } finally {
+    btn.textContent = "Execute";
+    btn.disabled = false;
+  }
+}
+
+async function walletAction(e, kind) {
+  e.preventDefault();
+  const amountId = kind === "deposit" ? "d-amount" : "w-amount";
+  const btn = e.target.querySelector("button");
+  btn.textContent = kind === "deposit" ? "Depositing…" : "Withdrawing…";
+  btn.disabled = true;
+  try {
+    const data = await api("/api/transactions/" + kind, {
+      method: "POST",
+      body: JSON.stringify({ amount: Number($(amountId).value) }),
+    });
+    toast((kind === "deposit" ? "Deposited" : "Withdrew") + " — balance now " + fmt(data.walletBalance));
+    $(amountId).value = "";
+    loadAll();
+  } catch (err) {
+    toast(err.message, false);
+  } finally {
+    btn.textContent = kind === "deposit" ? "Deposit" : "Withdraw";
+    btn.disabled = false;
+  }
+}
+
+async function loadAdmin() {
+  try {
+    const a = await api("/api/analytics/admin/overview");
+    $("a-users").textContent = a.totalUsers;
+    $("a-volume").textContent = fmt(a.totalPlatformVolume);
+    $("a-active7").textContent = a.retention.activeUsersLast7Days + " / " + a.retention.activeUsersLast30Days;
+    $("a-retention").textContent = a.retention.retentionRate7dOf30d + "%";
+    $("a-active30").textContent = "active in last 30 days";
+    const body = $("admin-body");
+    body.innerHTML = "";
+    a.topUsersByVolume.forEach((u, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + (i + 1) + "</td><td><b>" + u.name + "</b></td><td>" + u.email + "</td><td>" + u.tradeCount + "</td><td>" + fmt(u.totalVolume) + "</td>";
+      body.appendChild(tr);
+    });
+  } catch (err) {
+    toast(err.message, false);
+  }
+}
+
+(async function init() {
+  if (!token) return;
+  try {
+    const data = await api("/api/auth/me");
+    user = data.user;
+    enterDashboard();
+  } catch (_) {
+    token = "";
+    localStorage.removeItem("token");
+  }
+})();
+</script>
+</body>
+</html>
