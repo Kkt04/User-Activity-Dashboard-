@@ -10,6 +10,7 @@ const authRoutes = require("./routes/authRoutes");
 const tradeRoutes = require("./routes/tradeRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 const cronRoutes = require("./routes/cronRoutes");
+const { initDemoData } = require("./utils/demoStore");
 
 const app = express();
 
@@ -29,7 +30,7 @@ if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
 const publicPath = path.join(__dirname, "..", "public");
 app.use(express.static(publicPath));
 
-// --- Enhanced Health & Diagnostic check ---
+// --- Enhanced Health check ---
 app.get("/health", async (req, res) => {
   let dbStatus = "disconnected";
   let dbError = null;
@@ -43,11 +44,12 @@ app.get("/health", async (req, res) => {
       dbError = err.message;
     }
   } else {
-    dbStatus = "not_configured";
+    dbStatus = "in-memory-demo";
   }
 
   res.json({
-    status: dbStatus === "connected" ? "ok" : "degraded",
+    status: "ok",
+    mode: dbStatus === "connected" ? "mongodb" : "in-memory-demo",
     environment: process.env.VERCEL ? "vercel-serverless" : "standalone-server",
     database: {
       status: dbStatus,
@@ -60,17 +62,25 @@ app.get("/health", async (req, res) => {
   });
 });
 
-// --- MongoDB connection middleware for API routes (Serverless safe) ---
+// --- Database & Demo-Store Connection Middleware ---
 app.use("/api", async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error("[DB] Connection error in request handler:", err.message);
-    res.status(503).json({
-      message: err.message || "Database connection failed. Please ensure MONGO_URI is properly configured.",
-      error: err.message,
-    });
+  if (process.env.MONGO_URI) {
+    try {
+      await connectDB();
+      req.isDemo = false;
+      return next();
+    } catch (err) {
+      console.warn("[DB] MongoDB unavailable, falling back to Demo Mode:", err.message);
+      req.isDemo = true;
+      req.dbError = err.message;
+      await initDemoData();
+      return next();
+    }
+  } else {
+    // Zero-config Demo Mode (works instantly out-of-the-box!)
+    req.isDemo = true;
+    await initDemoData();
+    return next();
   }
 });
 

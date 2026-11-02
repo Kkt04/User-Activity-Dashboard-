@@ -1,12 +1,11 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const demoStore = require("../utils/demoStore");
+
+const JWT_SECRET = process.env.JWT_SECRET || "tradeflow_secure_default_secret_2026";
 
 function signToken(userId) {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET environment variable is not defined");
-  }
-  return jwt.sign({ id: userId }, secret, {
+  return jwt.sign({ id: userId }, JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
 }
@@ -28,6 +27,19 @@ async function register(req, res) {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+
+    if (req.isDemo) {
+      const existing = await demoStore.findUserByEmail(normalizedEmail);
+      if (existing) {
+        return res.status(409).json({ message: "Email already registered" });
+      }
+      const user = await demoStore.createUser({ name, email, password });
+      const token = signToken(user._id);
+      const safeUser = { ...user };
+      delete safeUser.password;
+      return res.status(201).json({ user: safeUser, token, isDemo: true });
+    }
+
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
       return res.status(409).json({ message: "Email already registered" });
@@ -55,6 +67,19 @@ async function login(req, res) {
     }
 
     const normalizedEmail = email.toLowerCase().trim();
+
+    if (req.isDemo) {
+      const user = await demoStore.findUserByEmail(normalizedEmail);
+      const bcrypt = require("bcryptjs");
+      if (!user || !(await bcrypt.compare(password, user.password))) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+      const token = signToken(user._id);
+      const safeUser = { ...user };
+      delete safeUser.password;
+      return res.json({ user: safeUser, token, isDemo: true });
+    }
+
     const user = await User.findOne({ email: normalizedEmail });
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ message: "Invalid email or password" });
@@ -69,7 +94,7 @@ async function login(req, res) {
 
 // GET /api/auth/me
 async function getMe(req, res) {
-  res.json({ user: req.user });
+  res.json({ user: req.user, isDemo: Boolean(req.isDemo) });
 }
 
 module.exports = { register, login, getMe };

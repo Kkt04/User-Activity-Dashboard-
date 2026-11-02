@@ -3,11 +3,17 @@ const Trade = require("../models/Trade");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
 const { generateCsv } = require("../utils/csvExport");
+const demoStore = require("../utils/demoStore");
 
 // GET /api/analytics/summary
 // Per-user P&L + activity summary (self-service)
 async function getUserSummary(req, res) {
   try {
+    if (req.isDemo) {
+      const summary = await demoStore.getUserSummary(req.user._id);
+      return res.json({ ...summary, isDemo: true });
+    }
+
     const userId = req.user._id;
     const userObjectId = new mongoose.Types.ObjectId(userId.toString());
 
@@ -58,6 +64,11 @@ async function getUserSummary(req, res) {
 // Platform-wide aggregate analytics for business intelligence
 async function getAdminOverview(req, res) {
   try {
+    if (req.isDemo) {
+      const overview = await demoStore.getAdminOverview();
+      return res.json({ ...overview, isDemo: true });
+    }
+
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -118,17 +129,31 @@ async function getAdminOverview(req, res) {
 // Generates a downloadable CSV of the logged-in user's trade history
 async function downloadTradeReportCsv(req, res) {
   try {
-    const trades = await Trade.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+    let records = [];
 
-    const records = trades.map((t) => ({
-      date: t.createdAt.toISOString(),
-      symbol: t.symbol,
-      type: t.type,
-      quantity: t.quantity,
-      price: t.price,
-      amount: t.amount,
-      status: t.status,
-    }));
+    if (req.isDemo) {
+      const result = await demoStore.getUserTrades(req.user._id, { limit: 1000 });
+      records = result.trades.map((t) => ({
+        date: new Date(t.createdAt).toISOString(),
+        symbol: t.symbol,
+        type: t.type,
+        quantity: t.quantity,
+        price: t.price,
+        amount: t.amount,
+        status: t.status,
+      }));
+    } else {
+      const trades = await Trade.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+      records = trades.map((t) => ({
+        date: t.createdAt.toISOString(),
+        symbol: t.symbol,
+        type: t.type,
+        quantity: t.quantity,
+        price: t.price,
+        amount: t.amount,
+        status: t.status,
+      }));
+    }
 
     if (records.length === 0) {
       return res.status(404).json({ message: "No trades found to export" });

@@ -1,6 +1,7 @@
 const Trade = require("../models/Trade");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
+const demoStore = require("../utils/demoStore");
 
 // POST /api/trades
 // Places a BUY/SELL trade and adjusts the user's wallet balance
@@ -34,6 +35,22 @@ async function placeTrade(req, res) {
       return res.status(400).json({ message: "Insufficient wallet balance for this trade" });
     }
 
+    user.walletBalance = Number(
+      (user.walletBalance + (tradeType === "BUY" ? -amount : amount)).toFixed(2)
+    );
+
+    if (req.isDemo) {
+      const trade = await demoStore.addTrade({
+        userId: user._id,
+        symbol: symbol.trim().toUpperCase(),
+        type: tradeType,
+        quantity: numQty,
+        price: numPrice,
+        amount,
+      });
+      return res.status(201).json({ trade, walletBalance: user.walletBalance, isDemo: true });
+    }
+
     const trade = await Trade.create({
       user: user._id,
       symbol: symbol.trim().toUpperCase(),
@@ -43,10 +60,6 @@ async function placeTrade(req, res) {
       amount,
     });
 
-    // BUY reduces wallet balance, SELL adds to it
-    user.walletBalance = Number(
-      (user.walletBalance + (tradeType === "BUY" ? -amount : amount)).toFixed(2)
-    );
     await user.save();
 
     res.status(201).json({ trade, walletBalance: user.walletBalance });
@@ -59,6 +72,12 @@ async function placeTrade(req, res) {
 async function getMyTrades(req, res) {
   try {
     const { from, to, page = 1, limit = 20 } = req.query;
+
+    if (req.isDemo) {
+      const result = await demoStore.getUserTrades(req.user._id, { from, to, page, limit });
+      return res.json({ ...result, isDemo: true });
+    }
+
     const filter = { user: req.user._id };
 
     if (from) {
@@ -112,8 +131,17 @@ async function deposit(req, res) {
     const depositAmount = Number(num.toFixed(2));
     const user = req.user;
     user.walletBalance = Number((user.walletBalance + depositAmount).toFixed(2));
-    await user.save();
 
+    if (req.isDemo) {
+      const tx = await demoStore.addTransaction({
+        userId: user._id,
+        type: "DEPOSIT",
+        amount: depositAmount,
+      });
+      return res.status(201).json({ transaction: tx, walletBalance: user.walletBalance, isDemo: true });
+    }
+
+    await user.save();
     const tx = await Transaction.create({ user: user._id, type: "DEPOSIT", amount: depositAmount });
     res.status(201).json({ transaction: tx, walletBalance: user.walletBalance });
   } catch (err) {
@@ -137,8 +165,17 @@ async function withdraw(req, res) {
     }
 
     user.walletBalance = Number((user.walletBalance - withdrawAmount).toFixed(2));
-    await user.save();
 
+    if (req.isDemo) {
+      const tx = await demoStore.addTransaction({
+        userId: user._id,
+        type: "WITHDRAWAL",
+        amount: withdrawAmount,
+      });
+      return res.status(201).json({ transaction: tx, walletBalance: user.walletBalance, isDemo: true });
+    }
+
+    await user.save();
     const tx = await Transaction.create({ user: user._id, type: "WITHDRAWAL", amount: withdrawAmount });
     res.status(201).json({ transaction: tx, walletBalance: user.walletBalance });
   } catch (err) {
@@ -172,8 +209,18 @@ async function subscribe(req, res) {
 
     user.walletBalance = Number((user.walletBalance - subAmount).toFixed(2));
     user.investmentPlan = normalizedPlan;
-    await user.save();
 
+    if (req.isDemo) {
+      const tx = await demoStore.addTransaction({
+        userId: user._id,
+        type: "SUBSCRIPTION",
+        amount: subAmount,
+        planName: normalizedPlan,
+      });
+      return res.status(201).json({ transaction: tx, user, walletBalance: user.walletBalance, isDemo: true });
+    }
+
+    await user.save();
     const tx = await Transaction.create({
       user: user._id,
       type: "SUBSCRIPTION",
