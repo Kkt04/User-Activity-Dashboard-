@@ -29,12 +29,33 @@ if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
 const publicPath = path.join(__dirname, "..", "public");
 app.use(express.static(publicPath));
 
-// --- Health check ---
-app.get("/health", (req, res) => {
+// --- Enhanced Health & Diagnostic check ---
+app.get("/health", async (req, res) => {
+  let dbStatus = "disconnected";
+  let dbError = null;
+
+  if (process.env.MONGO_URI) {
+    try {
+      await connectDB();
+      dbStatus = "connected";
+    } catch (err) {
+      dbStatus = "error";
+      dbError = err.message;
+    }
+  } else {
+    dbStatus = "not_configured";
+  }
+
   res.json({
-    status: "ok",
+    status: dbStatus === "connected" ? "ok" : "degraded",
     environment: process.env.VERCEL ? "vercel-serverless" : "standalone-server",
-    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    database: {
+      status: dbStatus,
+      configured: Boolean(process.env.MONGO_URI),
+      isAtlas: process.env.MONGO_URI ? process.env.MONGO_URI.startsWith("mongodb+srv://") : false,
+      error: dbError,
+    },
+    jwtConfigured: Boolean(process.env.JWT_SECRET),
     time: new Date().toISOString(),
   });
 });
@@ -47,8 +68,8 @@ app.use("/api", async (req, res, next) => {
   } catch (err) {
     console.error("[DB] Connection error in request handler:", err.message);
     res.status(503).json({
-      message: "Database connection failed. Please ensure MONGO_URI is properly configured.",
-      error: process.env.NODE_ENV === "production" ? undefined : err.message,
+      message: err.message || "Database connection failed. Please ensure MONGO_URI is properly configured.",
+      error: err.message,
     });
   }
 });
