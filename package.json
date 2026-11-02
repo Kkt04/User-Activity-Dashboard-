@@ -4,6 +4,7 @@
   "description": "User Activity Analytics Dashboard - trade logs, automated P&L reports, analytics APIs",
   "main": "src/server.js",
   "scripts": {
+    "build": "echo 'Build complete'",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/utils/seed.js"
