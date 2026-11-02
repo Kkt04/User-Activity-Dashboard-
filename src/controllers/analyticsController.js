@@ -2,16 +2,17 @@ const mongoose = require("mongoose");
 const Trade = require("../models/Trade");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
-const { writeCsvFile } = require("../utils/csvExport");
+const { generateCsv } = require("../utils/csvExport");
 
 // GET /api/analytics/summary
-// Per-user P&L + activity summary (self-service, matches "Automation of User reports" JD point)
+// Per-user P&L + activity summary (self-service)
 async function getUserSummary(req, res) {
   try {
     const userId = req.user._id;
+    const userObjectId = new mongoose.Types.ObjectId(userId.toString());
 
     const pnlAgg = await Trade.aggregate([
-      { $match: { user: new mongoose.Types.ObjectId(userId), status: "EXECUTED" } },
+      { $match: { user: userObjectId, status: "EXECUTED" } },
       {
         $group: {
           _id: "$type",
@@ -25,25 +26,28 @@ async function getUserSummary(req, res) {
     const buy = pnlAgg.find((r) => r._id === "BUY") || { totalAmount: 0, count: 0 };
     const sell = pnlAgg.find((r) => r._id === "SELL") || { totalAmount: 0, count: 0 };
 
-    // Simplified realized P&L: total sold value - total bought value
-    const realizedPnL = sell.totalAmount - buy.totalAmount;
+    // Realized P&L: total sold value - total bought value
+    const realizedPnL = Number((sell.totalAmount - buy.totalAmount).toFixed(2));
 
     const deposits = await Transaction.aggregate([
-      { $match: { user: new mongoose.Types.ObjectId(userId), type: "DEPOSIT" } },
+      { $match: { user: userObjectId, type: "DEPOSIT" } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
     const withdrawals = await Transaction.aggregate([
-      { $match: { user: new mongoose.Types.ObjectId(userId), type: "WITHDRAWAL" } },
+      { $match: { user: userObjectId, type: "WITHDRAWAL" } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
 
     res.json({
-      walletBalance: req.user.walletBalance,
+      walletBalance: Number((req.user.walletBalance || 0).toFixed(2)),
       trades: { buyCount: buy.count, sellCount: sell.count, totalTrades: buy.count + sell.count },
-      totals: { totalBought: buy.totalAmount, totalSold: sell.totalAmount },
+      totals: {
+        totalBought: Number((buy.totalAmount || 0).toFixed(2)),
+        totalSold: Number((sell.totalAmount || 0).toFixed(2)),
+      },
       realizedPnL,
-      deposits: deposits[0]?.total || 0,
-      withdrawals: withdrawals[0]?.total || 0,
+      deposits: Number((deposits[0]?.total || 0).toFixed(2)),
+      withdrawals: Number((withdrawals[0]?.total || 0).toFixed(2)),
     });
   } catch (err) {
     res.status(500).json({ message: "Failed to build summary", error: err.message });
@@ -51,7 +55,7 @@ async function getUserSummary(req, res) {
 }
 
 // GET /api/analytics/admin/overview  (admin only)
-// Platform-wide aggregate analytics -> "Derive meaningful analytics ... for business development teams"
+// Platform-wide aggregate analytics for business intelligence
 async function getAdminOverview(req, res) {
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -60,6 +64,7 @@ async function getAdminOverview(req, res) {
     const [topUsersByVolume, totalPlatformVolume, activeLast7d, activeLast30d, totalUsers] =
       await Promise.all([
         Trade.aggregate([
+          { $match: { status: "EXECUTED" } },
           { $group: { _id: "$user", totalVolume: { $sum: "$amount" }, tradeCount: { $sum: 1 } } },
           { $sort: { totalVolume: -1 } },
           { $limit: 10 },
@@ -78,16 +83,24 @@ async function getAdminOverview(req, res) {
             },
           },
         ]),
-        Trade.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]),
-        Trade.distinct("user", { createdAt: { $gte: sevenDaysAgo } }),
-        Trade.distinct("user", { createdAt: { $gte: thirtyDaysAgo } }),
+        Trade.aggregate([
+          { $match: { status: "EXECUTED" } },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ]),
+        Trade.distinct("user", { createdAt: { $gte: sevenDaysAgo }, status: "EXECUTED" }),
+        Trade.distinct("user", { createdAt: { $gte: thirtyDaysAgo }, status: "EXECUTED" }),
         User.countDocuments(),
       ]);
 
+    const formattedTopUsers = topUsersByVolume.map((u) => ({
+      ...u,
+      totalVolume: Number((u.totalVolume || 0).toFixed(2)),
+    }));
+
     res.json({
       totalUsers,
-      totalPlatformVolume: totalPlatformVolume[0]?.total || 0,
-      topUsersByVolume,
+      totalPlatformVolume: Number((totalPlatformVolume[0]?.total || 0).toFixed(2)),
+      topUsersByVolume: formattedTopUsers,
       retention: {
         activeUsersLast7Days: activeLast7d.length,
         activeUsersLast30Days: activeLast30d.length,
@@ -103,7 +116,6 @@ async function getAdminOverview(req, res) {
 
 // GET /api/analytics/report/csv
 // Generates a downloadable CSV of the logged-in user's trade history
-// -> "Automation of User reports - Detailed summary" JD point
 async function downloadTradeReportCsv(req, res) {
   try {
     const trades = await Trade.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
@@ -123,9 +135,12 @@ async function downloadTradeReportCsv(req, res) {
     }
 
     const fields = ["date", "symbol", "type", "quantity", "price", "amount", "status"];
-    const filePath = writeCsvFile(records, fields, `trade-report-${req.user._id}`);
+    const csv = generateCsv(records, fields);
+    const filename = `trade-report-${req.user._id}-${Date.now()}.csv`;
 
-    res.download(filePath);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.status(200).send(csv);
   } catch (err) {
     res.status(500).json({ message: "Failed to generate CSV report", error: err.message });
   }

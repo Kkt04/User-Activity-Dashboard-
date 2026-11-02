@@ -7,28 +7,46 @@ const User = require("../models/User");
 async function placeTrade(req, res) {
   try {
     const { symbol, type, quantity, price } = req.body;
-    if (!symbol || !type || !quantity || !price) {
-      return res.status(400).json({ message: "symbol, type, quantity and price are required" });
+
+    if (!symbol || typeof symbol !== "string" || !symbol.trim()) {
+      return res.status(400).json({ message: "Valid symbol is required" });
     }
 
-    const amount = quantity * price;
+    const tradeType = (type || "").toUpperCase().trim();
+    if (!["BUY", "SELL"].includes(tradeType)) {
+      return res.status(400).json({ message: "type must be BUY or SELL" });
+    }
+
+    const numQty = Number(quantity);
+    if (isNaN(numQty) || numQty <= 0) {
+      return res.status(400).json({ message: "quantity must be a positive number" });
+    }
+
+    const numPrice = Number(price);
+    if (isNaN(numPrice) || numPrice <= 0) {
+      return res.status(400).json({ message: "price must be a positive number" });
+    }
+
+    const amount = Number((numQty * numPrice).toFixed(2));
     const user = req.user;
 
-    if (type === "BUY" && user.walletBalance < amount) {
+    if (tradeType === "BUY" && user.walletBalance < amount) {
       return res.status(400).json({ message: "Insufficient wallet balance for this trade" });
     }
 
     const trade = await Trade.create({
       user: user._id,
-      symbol,
-      type,
-      quantity,
-      price,
+      symbol: symbol.trim().toUpperCase(),
+      type: tradeType,
+      quantity: numQty,
+      price: numPrice,
       amount,
     });
 
     // BUY reduces wallet balance, SELL adds to it
-    user.walletBalance += type === "BUY" ? -amount : amount;
+    user.walletBalance = Number(
+      (user.walletBalance + (tradeType === "BUY" ? -amount : amount)).toFixed(2)
+    );
     await user.save();
 
     res.status(201).json({ trade, walletBalance: user.walletBalance });
@@ -43,20 +61,41 @@ async function getMyTrades(req, res) {
     const { from, to, page = 1, limit = 20 } = req.query;
     const filter = { user: req.user._id };
 
-    if (from || to) {
-      filter.createdAt = {};
-      if (from) filter.createdAt.$gte = new Date(from);
-      if (to) filter.createdAt.$lte = new Date(to);
+    if (from) {
+      const fromDate = new Date(from);
+      if (isNaN(fromDate.getTime())) {
+        return res.status(400).json({ message: "Invalid 'from' date format" });
+      }
+      filter.createdAt = filter.createdAt || {};
+      filter.createdAt.$gte = fromDate;
     }
 
-    const trades = await Trade.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    if (to) {
+      const toDate = new Date(to);
+      if (isNaN(toDate.getTime())) {
+        return res.status(400).json({ message: "Invalid 'to' date format" });
+      }
+      filter.createdAt = filter.createdAt || {};
+      filter.createdAt.$lte = toDate;
+    }
 
-    const total = await Trade.countDocuments(filter);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
 
-    res.json({ trades, total, page: Number(page), pages: Math.ceil(total / limit) });
+    const [trades, total] = await Promise.all([
+      Trade.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Trade.countDocuments(filter),
+    ]);
+
+    res.json({
+      trades,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum) || 1,
+    });
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch trades", error: err.message });
   }
@@ -65,16 +104,17 @@ async function getMyTrades(req, res) {
 // POST /api/transactions/deposit
 async function deposit(req, res) {
   try {
-    const { amount } = req.body;
-    if (!amount || amount <= 0) {
+    const num = Number(req.body.amount);
+    if (isNaN(num) || num <= 0) {
       return res.status(400).json({ message: "amount must be a positive number" });
     }
 
+    const depositAmount = Number(num.toFixed(2));
     const user = req.user;
-    user.walletBalance += amount;
+    user.walletBalance = Number((user.walletBalance + depositAmount).toFixed(2));
     await user.save();
 
-    const tx = await Transaction.create({ user: user._id, type: "DEPOSIT", amount });
+    const tx = await Transaction.create({ user: user._id, type: "DEPOSIT", amount: depositAmount });
     res.status(201).json({ transaction: tx, walletBalance: user.walletBalance });
   } catch (err) {
     res.status(500).json({ message: "Deposit failed", error: err.message });
@@ -84,20 +124,22 @@ async function deposit(req, res) {
 // POST /api/transactions/withdraw
 async function withdraw(req, res) {
   try {
-    const { amount } = req.body;
-    const user = req.user;
-
-    if (!amount || amount <= 0) {
+    const num = Number(req.body.amount);
+    if (isNaN(num) || num <= 0) {
       return res.status(400).json({ message: "amount must be a positive number" });
     }
-    if (user.walletBalance < amount) {
+
+    const withdrawAmount = Number(num.toFixed(2));
+    const user = req.user;
+
+    if (user.walletBalance < withdrawAmount) {
       return res.status(400).json({ message: "Insufficient balance" });
     }
 
-    user.walletBalance -= amount;
+    user.walletBalance = Number((user.walletBalance - withdrawAmount).toFixed(2));
     await user.save();
 
-    const tx = await Transaction.create({ user: user._id, type: "WITHDRAWAL", amount });
+    const tx = await Transaction.create({ user: user._id, type: "WITHDRAWAL", amount: withdrawAmount });
     res.status(201).json({ transaction: tx, walletBalance: user.walletBalance });
   } catch (err) {
     res.status(500).json({ message: "Withdrawal failed", error: err.message });
@@ -110,25 +152,36 @@ async function subscribe(req, res) {
     const { planName, amount } = req.body;
     const user = req.user;
 
-    if (!planName || !amount) {
-      return res.status(400).json({ message: "planName and amount are required" });
+    const num = Number(amount);
+    if (isNaN(num) || num <= 0) {
+      return res.status(400).json({ message: "amount must be a positive number" });
     }
-    if (user.walletBalance < amount) {
+
+    const validPlans = ["basic", "growth", "premium"];
+    const normalizedPlan = (planName || "").toLowerCase().trim();
+    if (!validPlans.includes(normalizedPlan)) {
+      return res.status(400).json({
+        message: `Invalid planName. Must be one of: ${validPlans.join(", ")}`,
+      });
+    }
+
+    const subAmount = Number(num.toFixed(2));
+    if (user.walletBalance < subAmount) {
       return res.status(400).json({ message: "Insufficient balance for subscription" });
     }
 
-    user.walletBalance -= amount;
-    user.investmentPlan = planName;
+    user.walletBalance = Number((user.walletBalance - subAmount).toFixed(2));
+    user.investmentPlan = normalizedPlan;
     await user.save();
 
     const tx = await Transaction.create({
       user: user._id,
       type: "SUBSCRIPTION",
-      amount,
-      planName,
+      amount: subAmount,
+      planName: normalizedPlan,
     });
 
-    res.status(201).json({ transaction: tx, user });
+    res.status(201).json({ transaction: tx, user, walletBalance: user.walletBalance });
   } catch (err) {
     res.status(500).json({ message: "Subscription failed", error: err.message });
   }

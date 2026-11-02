@@ -1,49 +1,43 @@
-require("dotenv").config();
-const express = require("express");
-const path = require("path");
-const cors = require("cors");
-const morgan = require("morgan");
-
+const app = require("./app");
 const connectDB = require("./config/db");
 const { startReportCron } = require("./jobs/reportCron");
 
-const authRoutes = require("./routes/authRoutes");
-const tradeRoutes = require("./routes/tradeRoutes");
-const analyticsRoutes = require("./routes/analyticsRoutes");
-
-const app = express();
-
-// --- Core middleware ---
-app.use(cors());
-app.use(express.json());
-app.use(morgan("dev"));
-
-// --- Frontend (static dashboard) ---
-app.use(express.static(path.join(__dirname, "..", "public")));
-
-// --- Health check ---
-app.get("/health", (req, res) => res.json({ status: "ok", time: new Date().toISOString() }));
-
-// --- Routes ---
-app.use("/api/auth", authRoutes);
-app.use("/api", tradeRoutes); // /api/trades, /api/transactions/*
-app.use("/api/analytics", analyticsRoutes);
-
-// --- 404 handler ---
-app.use((req, res) => res.status(404).json({ message: "Route not found" }));
-
-// --- Global error handler ---
-app.use((err, req, res, next) => {
-  console.error("[ERROR]", err.stack);
-  res.status(500).json({ message: "Internal server error" });
-});
-
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = parseInt(process.env.PORT, 10) || 5003;
 
 async function start() {
-  await connectDB();
+  try {
+    await connectDB();
+  } catch (err) {
+    console.warn("[SERVER] Starting server without initial MongoDB connection:", err.message);
+  }
+
   startReportCron();
-  app.listen(PORT, () => console.log(`[SERVER] Running on http://localhost:${PORT}`));
+
+  function listenOnPort(port, attempts = 0) {
+    const server = app.listen(port, () => {
+      console.log(`[SERVER] Running on http://localhost:${port}`);
+    });
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE" && attempts < 5) {
+        // Port 5000 is occupied by macOS ControlCenter / AirPlay by default
+        const nextPort = port === 5000 ? 5003 : port + 1;
+        console.warn(
+          `[SERVER] Port ${port} is already in use (often macOS AirPlay / Control Center). Retrying on port ${nextPort}...`
+        );
+        listenOnPort(nextPort, attempts + 1);
+      } else {
+        console.error("[SERVER] Fatal server error:", err.message);
+        process.exit(1);
+      }
+    });
+  }
+
+  listenOnPort(DEFAULT_PORT);
 }
 
-start();
+if (require.main === module) {
+  start();
+}
+
+module.exports = app;

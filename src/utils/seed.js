@@ -1,4 +1,4 @@
-// Populates the DB with sample users, trades and transactions for local testing/demo.
+// Populates the DB with sample users, trades and transactions for testing/demo.
 // Run with: npm run seed
 require("dotenv").config();
 const mongoose = require("mongoose");
@@ -29,45 +29,49 @@ async function seed() {
     const user = await User.create({
       name: `Demo User ${i}`,
       email: `user${i}@example.com`,
-      password: "password123", // hashed automatically by the User model
+      password: "password123",
       role: i === 1 ? "admin" : "user",
       walletBalance: 50000,
+      investmentPlan: i === 1 ? "premium" : "basic",
     });
     users.push(user);
   }
 
   console.log("[SEED] Creating trades + transactions...");
   for (const user of users) {
-    // A few deposits
+    // Deposits
     for (let i = 0; i < randomInt(1, 3); i++) {
       const amount = randomInt(5000, 20000);
       await Transaction.create({ user: user._id, type: "DEPOSIT", amount });
     }
 
-    // A batch of trades spread across the last 30 days
-    for (let i = 0; i < randomInt(5, 15); i++) {
+    // Historical trades spread across the last 30 days
+    for (let i = 0; i < randomInt(6, 16); i++) {
       const type = Math.random() > 0.5 ? "BUY" : "SELL";
       const quantity = randomInt(1, 10);
       const price = randomInt(100, 5000);
-      const amount = quantity * price;
+      const amount = Number((quantity * price).toFixed(2));
       const daysAgo = randomInt(0, 30);
+      const date = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
 
-      const trade = await Trade.create({
+      await Trade.create({
         user: user._id,
         symbol: randomOf(SYMBOLS),
         type,
         quantity,
         price,
         amount,
+        status: "EXECUTED",
+        createdAt: date,
+        updatedAt: date,
       });
-
-      // Backdate createdAt to simulate historical activity
-      trade.createdAt = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
-      await trade.save();
     }
   }
 
-  console.log("[SEED] Done. Sample login -> email: user1@example.com / password: password123");
+  console.log("[SEED] Done!");
+  console.log("  Demo Admin: user1@example.com / password123");
+  console.log("  Demo Users: user2@example.com ... user5@example.com / password123");
+
   await mongoose.connection.close();
   process.exit(0);
 }

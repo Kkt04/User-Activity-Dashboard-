@@ -1,12 +1,11 @@
 const cron = require("node-cron");
-const mongoose = require("mongoose");
-const User = require("../models/User");
 const Trade = require("../models/Trade");
 const { writeCsvFile } = require("../utils/csvExport");
 
 // Builds one aggregate summary row per user: trades, volume, realized P&L
 async function buildDailySummaryRows() {
   const rows = await Trade.aggregate([
+    { $match: { status: "EXECUTED" } },
     {
       $group: {
         _id: { user: "$user", type: "$type" },
@@ -32,10 +31,10 @@ async function buildDailySummaryRows() {
       name: r.user.name,
       email: r.user.email,
       totalTrades: buy.count + sell.count,
-      totalBought: buy.totalAmount,
-      totalSold: sell.totalAmount,
-      realizedPnL: sell.totalAmount - buy.totalAmount,
-      walletBalance: r.user.walletBalance,
+      totalBought: Number((buy.totalAmount || 0).toFixed(2)),
+      totalSold: Number((sell.totalAmount || 0).toFixed(2)),
+      realizedPnL: Number(((sell.totalAmount || 0) - (buy.totalAmount || 0)).toFixed(2)),
+      walletBalance: Number((r.user.walletBalance || 0).toFixed(2)),
       reportDate: new Date().toISOString().slice(0, 10),
     };
   });
@@ -48,7 +47,7 @@ async function runDailyReportJob() {
 
     if (rows.length === 0) {
       console.log("[CRON] No trade activity found, skipping report generation.");
-      return;
+      return { success: true, count: 0, message: "No trade activity found" };
     }
 
     const fields = [
@@ -65,17 +64,28 @@ async function runDailyReportJob() {
 
     const filePath = writeCsvFile(rows, fields, "daily-platform-report");
     console.log(`[CRON] Report generated: ${filePath} (${rows.length} users)`);
+    return { success: true, count: rows.length, filePath };
   } catch (err) {
     console.error("[CRON] Report generation failed:", err.message);
+    throw err;
   }
 }
 
-// Schedules the job. Default: every day at 1:00 AM server time.
-// Cron format: minute hour day month weekday
+// Schedules the job for persistent Node.js servers
 function startReportCron() {
+  if (process.env.VERCEL) {
+    // On Vercel, cron is triggered via Vercel Crons endpoint (/api/cron/daily-report)
+    return;
+  }
   const schedule = process.env.REPORT_CRON_SCHEDULE || "0 1 * * *";
-  cron.schedule(schedule, runDailyReportJob);
+  cron.schedule(schedule, async () => {
+    try {
+      await runDailyReportJob();
+    } catch (err) {
+      console.error("[CRON] Scheduled task error:", err.message);
+    }
+  });
   console.log(`[CRON] Daily report job scheduled with pattern "${schedule}"`);
 }
 
-module.exports = { startReportCron, runDailyReportJob };
+module.exports = { startReportCron, runDailyReportJob, buildDailySummaryRows };
